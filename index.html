@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Dashboard de Análise de Tráfego</title>
+    <script src="[https://cdn.tailwindcss.com](https://cdn.tailwindcss.com)"></script>
+    <script src="[https://cdn.jsdelivr.net/npm/chart.js](https://cdn.jsdelivr.net/npm/chart.js)"></script>
+</head>
+<body class="bg-gray-900 text-white min-h-screen flex flex-col items-center p-8">
+    <div class="w-full max-w-6xl mx-auto">
+        <header class="text-center mb-6">
+            <h1 class="text-4xl font-bold text-cyan-400">Dashboard de Análise de Tráfego</h1>
+            <p class="text-lg text-gray-400 mt-2">Volume de tráfego por cliente nos últimos 5 segundos</p>
+        </header>
+        <main class="bg-gray-800 p-6 rounded-2xl shadow-lg w-full">
+            <div class="relative h-[500px]">
+                <canvas id="trafficChart"></canvas>
+            </div>
+        </main>
+    </div>
+<script>
+document.addEventListener('DOMContentLoaded', () => {
+    const API_URL = '[http://127.0.0.1:5000/traffic](http://127.0.0.1:5000/traffic)';
+    const ctx = document.getElementById('trafficChart').getContext('2d');
+    let trafficChart;
+
+    async function fetchData() {
+        try {
+            const response = await fetch(API_URL);
+            const result = await response.json();
+            const data = result.data;
+            const ips = Object.keys(data);
+            const trafficInData = ips.map(ip => data[ip].total_in);
+            const trafficOutData = ips.map(ip => data[ip].total_out);
+
+            const chartData = {
+                labels: ips,
+                datasets: [
+                    { label: 'Tráfego de Entrada (Bytes)', data: trafficInData, backgroundColor: 'rgba(22, 163, 74, 0.7)' },
+                    { label: 'Tráfego de Saída (Bytes)', data: trafficOutData, backgroundColor: 'rgba(59, 130, 246, 0.7)' }
+                ]
+            };
+
+            if (trafficChart) {
+                trafficChart.data = chartData;
+                trafficChart.update();
+            } else {
+                trafficChart = new Chart(ctx, { type: 'bar', data: chartData, options: { responsive: true, maintainAspectRatio: false } });
+            }
+        } catch (error) {
+            console.error('Falha ao buscar dados:', error);
+        }
+    }
+    fetchData();
+    setInterval(fetchData, 5000);
+});
+</script>
+</body>
+</html>
