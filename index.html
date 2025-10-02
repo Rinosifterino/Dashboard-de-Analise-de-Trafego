@@ -4,57 +4,246 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Dashboard de Análise de Tráfego</title>
-    <script src="[https://cdn.tailwindcss.com](https://cdn.tailwindcss.com)"></script>
-    <script src="[https://cdn.jsdelivr.net/npm/chart.js](https://cdn.jsdelivr.net/npm/chart.js)"></script>
+    <!-- Incluindo Tailwind CSS para estilização rápida e moderna -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Incluindo Chart.js para os gráficos -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <!-- Incluindo o plugin datalabels para exibir valores nas barras -->
+    <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2.0.0"></script>
+    <style>
+        /* Estilo customizado para garantir que o corpo ocupe toda a altura */
+        body {
+            font-family: 'Inter', sans-serif;
+        }
+    </style>
 </head>
-<body class="bg-gray-900 text-white min-h-screen flex flex-col items-center p-8">
+<body class="bg-gray-900 text-white min-h-screen flex flex-col items-center p-4 sm:p-6 md:p-8">
+
     <div class="w-full max-w-6xl mx-auto">
+        <!-- Cabeçalho -->
         <header class="text-center mb-6">
-            <h1 class="text-4xl font-bold text-cyan-400">Dashboard de Análise de Tráfego</h1>
-            <p class="text-lg text-gray-400 mt-2">Volume de tráfego por cliente nos últimos 5 segundos</p>
+            <h1 class="text-3xl sm:text-4xl font-bold text-cyan-400">Dashboard de Análise de Tráfego</h1>
+            <p id="dashboard-subtitle" class="text-lg text-gray-400 mt-2">Volume de tráfego (Entrada/Saída) por cliente nos últimos 5 segundos</p>
         </header>
-        <main class="bg-gray-800 p-6 rounded-2xl shadow-lg w-full">
-            <div class="relative h-[500px]">
+
+        <!-- Container do Gráfico e Controles -->
+        <main class="bg-gray-800 p-4 sm:p-6 rounded-2xl shadow-2xl shadow-cyan-500/10 w-full">
+            <div id="controls" class="mb-4 h-10 flex items-center">
+                 <!-- O botão de voltar será inserido aqui pelo JavaScript -->
+            </div>
+            
+            <div id="chart-container" class="relative h-96 sm:h-[500px]">
                 <canvas id="trafficChart"></canvas>
+                <!-- Mensagem de status para o usuário -->
+                <div id="status-message" class="absolute inset-0 flex items-center justify-center text-gray-400 text-xl bg-gray-800/80 rounded-lg">
+                    Aguardando dados do servidor...
+                </div>
             </div>
         </main>
-    </div>
-<script>
-document.addEventListener('DOMContentLoaded', () => {
-    const API_URL = '[http://127.0.0.1:5000/traffic](http://127.0.0.1:5000/traffic)';
-    const ctx = document.getElementById('trafficChart').getContext('2d');
-    let trafficChart;
 
+        <!-- Rodapé -->
+        <footer class="text-center mt-8 text-gray-500">
+            <p>Atualizando dados a cada 5 segundos. O backend deve estar em execução.</p>
+        </footer>
+    </div>
+
+<script>
+// =============================================================================
+// PASSO 3, 4 e 5: FRONTEND - Gráfico dinâmico com Drill Down e Hostnames
+// =============================================================================
+// Este script realiza as seguintes tarefas:
+// 1. Inicializa um gráfico Chart.js vazio.
+// 2. Busca dados da API do backend, que agora incluem hostnames.
+// 3. Atualiza o gráfico principal, exibindo o IP e o hostname no eixo X.
+// 4. Gerencia o estado da visualização (visão geral vs. visão de drill down).
+// 5. Implementa a funcionalidade de clique (drill down).
+// =============================================================================
+
+document.addEventListener('DOMContentLoaded', () => {
+    const API_URL = 'http://127.0.0.1:5000/traffic';
+    const ctx = document.getElementById('trafficChart').getContext('2d');
+    const statusMessageEl = document.getElementById('status-message');
+    const controlsEl = document.getElementById('controls');
+    const subtitleEl = document.getElementById('dashboard-subtitle');
+
+    let trafficChart;
+    let currentTrafficData = {}; // Armazena os dados mais recentes da API
+    let isDrillDownView = false; // Controla o estado da visualização
+    let selectedIp = null; // Armazena o IP selecionado na visão de drill down
+
+    // Configuração padrão para os gráficos
+    const chartOptions = {
+        responsive: true,
+        maintainAspectRatio: false,
+        scales: {
+            y: {
+                beginAtZero: true,
+                ticks: { color: '#9CA3AF' },
+                grid: { color: 'rgba(255, 255, 255, 0.1)' },
+                title: {
+                    display: true,
+                    text: 'Volume de Tráfego (Bytes)',
+                    color: '#9CA3AF'
+                }
+            },
+            x: {
+                ticks: { color: '#9CA3AF' },
+                grid: { color: 'rgba(255, 255, 255, 0.1)' }
+            }
+        },
+        plugins: {
+            legend: { labels: { color: '#E5E7EB' } },
+            tooltip: {
+                backgroundColor: '#1F2937',
+                titleColor: '#E5E7EB',
+                bodyColor: '#D1D5DB',
+                callbacks: {
+                    label: (context) => `${context.dataset.label}: ${context.parsed.y.toLocaleString('pt-BR')} bytes`
+                }
+            },
+            datalabels: {
+                anchor: 'end',
+                align: 'top',
+                color: '#cbd5e1',
+                formatter: (value) => value > 0 ? value.toLocaleString('pt-BR') : '',
+                font: { weight: 'bold' }
+            }
+        },
+        onClick: (event, elements) => {
+            if (isDrillDownView || elements.length === 0) return;
+            
+            const index = elements[0].index;
+            const label = trafficChart.data.labels[index];
+            // NOVO: Extrai o IP do label, que agora pode ser um array [ip, hostname]
+            const ip = Array.isArray(label) ? label[0] : label;
+            
+            renderDrillDownView(ip);
+        }
+    };
+
+    // Função para renderizar a visão geral (tráfego por IP)
+    function renderMainView(data) {
+        isDrillDownView = false;
+        selectedIp = null;
+        controlsEl.innerHTML = '';
+        subtitleEl.textContent = 'Volume de tráfego (Entrada/Saída) por cliente nos últimos 5 segundos';
+        
+        const ips = Object.keys(data);
+        
+        // NOVO: Cria labels com IP e hostname. Chart.js suporta arrays para múltiplas linhas.
+        const labels = ips.map(ip => {
+            const hostname = data[ip].hostname;
+            // Só mostra o hostname se ele for diferente do IP para não ser redundante
+            return (hostname && hostname !== ip) ? [ip, hostname] : ip;
+        });
+
+        const trafficInData = ips.map(ip => data[ip].total_in);
+        const trafficOutData = ips.map(ip => data[ip].total_out);
+
+        const chartData = {
+            labels: labels,
+            datasets: [
+                {
+                    label: 'Tráfego de Entrada (Bytes)',
+                    data: trafficInData,
+                    backgroundColor: 'rgba(22, 163, 74, 0.7)',
+                    borderColor: 'rgba(34, 197, 94, 1)',
+                    borderWidth: 1
+                },
+                {
+                    label: 'Tráfego de Saída (Bytes)',
+                    data: trafficOutData,
+                    backgroundColor: 'rgba(59, 130, 246, 0.7)',
+                    borderColor: 'rgba(96, 165, 250, 1)',
+                    borderWidth: 1
+                }
+            ]
+        };
+
+        if (trafficChart) {
+            trafficChart.data = chartData;
+            trafficChart.update();
+        } else {
+            Chart.register(ChartDataLabels);
+            trafficChart = new Chart(ctx, { type: 'bar', data: chartData, options: chartOptions });
+        }
+    }
+
+    // Função para renderizar a visão de drill down (tráfego por protocolo)
+    function renderDrillDownView(ip) {
+        isDrillDownView = true;
+        selectedIp = ip;
+        
+        const ipData = currentTrafficData[ip];
+        if (!ipData) return;
+
+        // NOVO: Mostra o hostname no subtítulo se ele existir
+        const hostname = ipData.hostname;
+        const displayTitle = (hostname && hostname !== ip) ? `${ip} (${hostname})` : ip;
+        subtitleEl.textContent = `Detalhe de tráfego por protocolo para o cliente: ${displayTitle}`;
+        
+        controlsEl.innerHTML = `
+            <button id="back-button" class="bg-cyan-600 hover:bg-cyan-700 text-white font-bold py-2 px-4 rounded-lg transition-colors duration-200">
+                &larr; Voltar para a Visão Geral
+            </button>
+        `;
+        document.getElementById('back-button').addEventListener('click', () => renderMainView(currentTrafficData));
+
+        const protocols = Object.keys(ipData.protocols);
+        const protocolInData = protocols.map(p => ipData.protocols[p].in);
+        const protocolOutData = protocols.map(p => ipData.protocols[p].out);
+
+        trafficChart.data = {
+            labels: protocols,
+            datasets: [
+                {
+                    label: 'Tráfego de Entrada (Bytes)',
+                    data: protocolInData,
+                    backgroundColor: 'rgba(22, 163, 74, 0.7)'
+                },
+                {
+                    label: 'Tráfego de Saída (Bytes)',
+                    data: protocolOutData,
+                    backgroundColor: 'rgba(59, 130, 246, 0.7)'
+                }
+            ]
+        };
+        trafficChart.update();
+    }
+
+    // Função principal para buscar e atualizar os dados
     async function fetchData() {
         try {
-            const response = await fetch(API_URL);
+            const response = await fetch(API_URL, { mode: 'cors' });
+            if (!response.ok) throw new Error(`Erro na API: ${response.statusText}`);
+            
             const result = await response.json();
-            const data = result.data;
-            const ips = Object.keys(data);
-            const trafficInData = ips.map(ip => data[ip].total_in);
-            const trafficOutData = ips.map(ip => data[ip].total_out);
+            
+            if (result.data && Object.keys(result.data).length > 0) {
+                statusMessageEl.style.display = 'none';
+                currentTrafficData = result.data;
 
-            const chartData = {
-                labels: ips,
-                datasets: [
-                    { label: 'Tráfego de Entrada (Bytes)', data: trafficInData, backgroundColor: 'rgba(22, 163, 74, 0.7)' },
-                    { label: 'Tráfego de Saída (Bytes)', data: trafficOutData, backgroundColor: 'rgba(59, 130, 246, 0.7)' }
-                ]
-            };
-
-            if (trafficChart) {
-                trafficChart.data = chartData;
-                trafficChart.update();
+                if (isDrillDownView && currentTrafficData[selectedIp]) {
+                    renderDrillDownView(selectedIp);
+                } else {
+                    renderMainView(currentTrafficData);
+                }
             } else {
-                trafficChart = new Chart(ctx, { type: 'bar', data: chartData, options: { responsive: true, maintainAspectRatio: false } });
+                 statusMessageEl.textContent = result.message || 'Nenhum tráfego detectado na última janela.';
+                 statusMessageEl.style.display = 'flex';
             }
         } catch (error) {
             console.error('Falha ao buscar dados:', error);
+            statusMessageEl.textContent = 'Erro de conexão. Verifique se o backend (app.py) está rodando.';
+            statusMessageEl.style.display = 'flex';
         }
     }
+
     fetchData();
     setInterval(fetchData, 5000);
 });
 </script>
+
 </body>
 </html>
+
